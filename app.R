@@ -3,21 +3,39 @@ library(dplyr)
 
 ui <- fluidPage(
   
-  titlePanel("Lithic Core Platform Analysis"),
+  titlePanel("Randomize Flaking Experiments"),  # Updated app title
   
   sidebarLayout(
     sidebarPanel(
       h3("Instructions"),
       p("Use the tabs to work through each step:"),
-      p("1. Set the number of platforms."),
-      p("2. Generate a random platform to strike."),
-      p("3. Record the presence/absence of platforms after striking."),
+      p("1. Enter experiment details."),
+      p("2. Set the number of platforms."),
+      p("3. Generate a random platform to strike."),
+      p("4. Record the presence/absence of platforms after striking."),
       hr(),
       downloadButton("download_data", "Download Data as CSV", style = "font-size: 18px; padding: 10px 20px;")
-      , width = 3),  # Adjust the width here to make it narrower (default is 4)
+      , width = 3),  # Sidebar panel narrower
     
     mainPanel(
       tabsetPanel(id = "inTabset",
+                  tabPanel("Experiment Details", 
+                           h4("Enter Experiment Details:"),
+                           textInput("experiment_number", "Experiment Number:"),
+                           dateInput("date", "Date:", value = Sys.Date()),
+                           textInput("knapper", "Knapper:"),
+                           textInput("material", "Material:"),
+                           selectInput("stone_quality", "Stone Quality:", choices = c("Excellent", "Good", "Fair", "Poor")),
+                           textInput("cobble_type", "Cobble Type:"),
+                           textInput("site_collected", "Site Collected:"),
+                           numericInput("length", "Length (mm):", value = NULL, min = 0),
+                           numericInput("width", "Width (mm):", value = NULL, min = 0),
+                           numericInput("thickness", "Thickness (mm):", value = NULL, min = 0),
+                           numericInput("weight", "Weight (g):", value = NULL, min = 0),
+                           textAreaInput("notes", "Notes:", ""),
+                           br(),
+                           actionButton("start_btn", "Start", style = "font-size: 18px; padding: 10px 20px;")
+                  ),
                   tabPanel("Platform Setup", 
                            h4("Set the number of platforms available:"),
                            actionButton("minus_btn", "-", style = "font-size: 24px; padding: 10px 20px;"),
@@ -36,6 +54,18 @@ ui <- fluidPage(
                            br(), br(),
                            uiOutput("random_platform_square"),
                            br(), br(),
+                           selectInput("platform_quality", "Platform Quality", choices = c("", 1:5), selected = ""),  # Platform Quality with empty default
+                           selectInput("platform_location", "Platform Location",
+                                       choices = c("", 
+                                                   "Position 1 (proximal end to 30% of the scar's length)" = "Position 1",
+                                                   "Position 2 (30% to 80% of the scar's length)" = "Position 2",
+                                                   "Position 3 (distal end, beyond 80% of the scar's length)" = "Position 3",
+                                                   "Position 4 (on cortical or specific surfaces)" = "Position 4",
+                                                   "Position 5 ('flawline cortex' surface)" = "Position 5",
+                                                   "Position 6 (small core scar remnants)" = "Position 6"
+                                       ), selected = ""),  # Platform Location with empty default
+                           selectInput("platform_type", "Platform Type", choices = c("", "Cortical", "Plain", "Dihedral"), selected = ""),  # Platform Type with empty default
+                           br(), br(),
                            div(
                              actionButton("go_to_record_btn", "Go to Record Presence/Absence", style = "font-size: 18px; padding: 10px 20px;"),
                              style = "position: absolute; right: 10px; bottom: 10px;"
@@ -48,36 +78,42 @@ ui <- fluidPage(
                            tableOutput("results_table"),
                            br(), br(),
                            div(
-                             actionButton("go_to_setup_btn", "Go to Platform Setup", style = "font-size: 18px; padding: 10px 20px;"),
+                             actionButton("go_to_setup_btn", "Start New Strike", style = "font-size: 18px; padding: 10px 20px;"),  # Updated button label
                              style = "position: absolute; right: 10px; bottom: 10px;"
                            )
                   )
       )
-      , width = 9)  # Adjust the main panel width to compensate (default is 8)
+      , width = 9)  # Main panel wider to accommodate more content
   )
 )
 
-
 server <- function(input, output, session) {
   
-  # Reactive value to store the current platforms (including their status)
+  # Reactive values to store the current platforms, experiment details, and random platform
   platforms <- reactiveVal(data.frame(Number = 1, Status = TRUE))
-  
-  # Reactive value to store the selected random platform
   random_platform <- reactiveVal(NULL)
-  
-  # Reactive value to store the platform presence/absence data as an R object
   platform_data <- reactiveVal(data.frame())
-  
-  # Reactive value to store the strike count
   strike_count <- reactiveVal(0)
+  max_platform_number <- reactiveVal(1)  # Track the maximum platform number used
+  
+  # Reactive value to store experiment details
+  experiment_details <- reactiveValues()
+  
+  # Start button to move from Experiment Details to Platform Setup
+  observeEvent(input$start_btn, {
+    # Store experiment details in reactive values
+    experiment_details$experiment_number <- input$experiment_number
+    
+    updateTabsetPanel(session, "inTabset", selected = "Platform Setup")
+  })
   
   # Increase the number of platforms
   observeEvent(input$plus_btn, {
     current_platforms <- platforms()
-    max_number <- ifelse(nrow(current_platforms) == 0, 0, max(current_platforms$Number))
-    new_platform <- data.frame(Number = max_number + 1, Status = TRUE)
+    new_number <- max_platform_number() + 1  # Use the next available platform number
+    new_platform <- data.frame(Number = new_number, Status = TRUE)
     platforms(rbind(current_platforms, new_platform))
+    max_platform_number(new_number)  # Update the max platform number used
   })
   
   # Decrease the number of platforms
@@ -107,9 +143,15 @@ server <- function(input, output, session) {
     }
   })
   
-  # Clear the random platform when navigating to Tab 2
+  # Clear the random platform when navigating to Tab 2 and reset dropdowns
   observeEvent(input$go_to_random_btn, {
     random_platform(NULL)
+    
+    # Reset the dropdowns to empty when going to the Random Platform tab
+    updateSelectInput(session, "platform_quality", selected = "")
+    updateSelectInput(session, "platform_location", selected = "")
+    updateSelectInput(session, "platform_type", selected = "")
+    
     updateTabsetPanel(session, "inTabset", selected = "Random Platform")
   })
   
@@ -129,7 +171,8 @@ server <- function(input, output, session) {
   observeEvent(input$generate_btn, {
     available_platforms <- platforms() %>% filter(Status == TRUE)
     if (nrow(available_platforms) > 0) {
-      random_platform(sample(available_platforms$Number, 1))
+      selected_platform <- sample(available_platforms$Number, 1)
+      random_platform(selected_platform)
     } else {
       random_platform(NULL)
     }
@@ -179,31 +222,45 @@ server <- function(input, output, session) {
   # Record the changes after toggling presence/absence
   observeEvent(input$record_changes_btn, {
     current_platforms <- platforms()
-    platforms(current_platforms)  # Update the reactive value with the new statuses
     
-    # Update the platform data stored in session
-    new_data <- as.data.frame(t(current_platforms$Status))
-    colnames(new_data) <- paste0("Platform_", current_platforms$Number)
+    # Collect platform statuses in a named vector
+    platform_statuses <- as.list(setNames(current_platforms$Status, paste0("Platform_", current_platforms$Number)))
     
+    # Add the new data row with experiment number, strike number, randomly selected platform, and platform statuses
+    new_data <- data.frame(
+      Experiment = experiment_details$experiment_number,
+      Strike = strike_count() + 1,
+      RandomPlatform = random_platform(),
+      Platform_Quality = input$platform_quality,  # Include Platform Quality in data
+      Platform_Location = input$platform_location,  # Include Platform Location in data
+      Platform_Type = input$platform_type,  # Include Platform Type in data
+      platform_statuses,
+      stringsAsFactors = FALSE
+    )
+    
+    # Ensure the column structure matches by including all potential platform columns
     existing_data <- platform_data()
+    all_columns <- union(names(existing_data), names(new_data))
     
-    if (nrow(existing_data) == 0) {
-      platform_data(new_data)
-    } else {
-      all_columns <- union(colnames(existing_data), colnames(new_data))
-      
-      for (col in setdiff(all_columns, colnames(existing_data))) {
+    # Ensure both existing and new data have all the columns
+    if (nrow(existing_data) > 0) {
+      for (col in setdiff(all_columns, names(existing_data))) {
         existing_data[[col]] <- NA
       }
-      
-      for (col in setdiff(all_columns, colnames(new_data))) {
-        new_data[[col]] <- NA
-      }
-      
-      existing_data <- existing_data[, all_columns, drop = FALSE]
-      new_data <- new_data[, all_columns, drop = FALSE]
-      
-      platform_data(rbind(existing_data, new_data))
+    }
+    for (col in setdiff(all_columns, names(new_data))) {
+      new_data[[col]] <- NA
+    }
+    
+    # Remove platforms marked as absent from further consideration
+    current_platforms <- current_platforms %>% filter(Status == TRUE)
+    platforms(current_platforms)  # Update the reactive value with the filtered statuses
+    
+    # Bind the new data to the existing data
+    if (nrow(existing_data) > 0) {
+      platform_data(rbind(existing_data[, all_columns], new_data[, all_columns]))
+    } else {
+      platform_data(new_data[, all_columns])
     }
     
     # Update the strike count
@@ -212,21 +269,18 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "inTabset", selected = "Record Presence/Absence")
   })
   
-  # Display the results table
+  # Display the results table with all relevant data
   output$results_table <- renderTable({
     platform_data()
   })
   
-  # Provide a button to download the data as a CSV file with a sequential strike number
+  # Provide a button to download the data as a CSV file with only Experiment and Random Platform
   output$download_data <- downloadHandler(
     filename = function() {
       paste("platform_data-", Sys.Date(), ".csv", sep = "")
     },
     content = function(file) {
       data <- platform_data()
-      if (nrow(data) > 0) {
-        data <- cbind(Strike = 1:nrow(data), data)
-      }
       write.csv(data, file, row.names = FALSE)
     }
   )
@@ -242,10 +296,11 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "inTabset", selected = "Record Presence/Absence")
   })
   
-  # Navigate back to the "Platform Setup" tab
+  # Navigate back to the "Platform Setup" tab (renamed button)
   observeEvent(input$go_to_setup_btn, {
     updateTabsetPanel(session, "inTabset", selected = "Platform Setup")
   })
 }
 
+# Run the application 
 shinyApp(ui = ui, server = server)
