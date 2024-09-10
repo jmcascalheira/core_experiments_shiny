@@ -2,8 +2,7 @@ library(shiny)
 library(dplyr)
 
 ui <- fluidPage(
-  
-  titlePanel("Randomize Flaking Experiments"),  # Updated app title
+  titlePanel("Randomize Flaking Experiments"),
   
   sidebarLayout(
     sidebarPanel(
@@ -14,8 +13,8 @@ ui <- fluidPage(
       p("3. Generate a random platform to strike."),
       p("4. Record the presence/absence of platforms after striking."),
       hr(),
-      downloadButton("download_data", "Download Data as CSV", style = "font-size: 18px; padding: 10px 20px;")
-      , width = 3),  # Sidebar panel narrower
+      width = 3
+    ),
     
     mainPanel(
       tabsetPanel(id = "inTabset",
@@ -34,7 +33,7 @@ ui <- fluidPage(
                            numericInput("weight", "Weight (g):", value = NULL, min = 0),
                            textAreaInput("notes", "Notes:", ""),
                            br(),
-                           actionButton("start_btn", "Start", style = "font-size: 18px; padding: 10px 20px;")
+                           downloadButton("download_experiment", label = "Download Experiment and Start", style = "font-size: 18px; padding: 10px 20px;")
                   ),
                   tabPanel("Platform Setup", 
                            h4("Set the number of platforms available:"),
@@ -96,16 +95,33 @@ server <- function(input, output, session) {
   strike_count <- reactiveVal(0)
   max_platform_number <- reactiveVal(1)  # Track the maximum platform number used
   
-  # Reactive value to store experiment details
-  experiment_details <- reactiveValues()
-  
-  # Start button to move from Experiment Details to Platform Setup
-  observeEvent(input$start_btn, {
-    # Store experiment details in reactive values
-    experiment_details$experiment_number <- input$experiment_number
-    
-    updateTabsetPanel(session, "inTabset", selected = "Platform Setup")
-  })
+  # Download handler for the experiment details CSV
+  output$download_experiment <- downloadHandler(
+    filename = function() {
+      paste0("experiment_details_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      experiment_info <- data.frame(
+        Experiment_Number = input$experiment_number,
+        Date = input$date,
+        Knapper = input$knapper,
+        Material = input$material,
+        Stone_Quality = input$stone_quality,
+        Cobble_Type = input$cobble_type,
+        Site_Collected = input$site_collected,
+        Length_mm = input$length,
+        Width_mm = input$width,
+        Thickness_mm = input$thickness,
+        Weight_g = input$weight,
+        Notes = input$notes,
+        stringsAsFactors = FALSE
+      )
+      write.csv(experiment_info, file, row.names = FALSE)
+      
+      # After downloading, move to Platform Setup tab
+      updateTabsetPanel(session, "inTabset", selected = "Platform Setup")
+    }
+  )
   
   # Increase the number of platforms
   observeEvent(input$plus_btn, {
@@ -228,7 +244,7 @@ server <- function(input, output, session) {
     
     # Add the new data row with experiment number, strike number, randomly selected platform, and platform statuses
     new_data <- data.frame(
-      Experiment = experiment_details$experiment_number,
+      Experiment = input$experiment_number,
       Strike = strike_count() + 1,
       RandomPlatform = random_platform(),
       Platform_Quality = input$platform_quality,  # Include Platform Quality in data
